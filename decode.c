@@ -1,5 +1,6 @@
 #include "postgres.h"
 #include "decode.h"
+#include "utils/inet.h"
 #include "pg_filedump.h"
 #include <lib/stringinfo.h>
 #include <access/htup_details.h>
@@ -74,6 +75,9 @@ decode_char(const char *buffer, unsigned int buff_size, unsigned int *out_size);
 
 static int
 decode_name(const char *buffer, unsigned int buff_size, unsigned int *out_size);
+
+static int
+decode_inet(const char *buffer, unsigned int buff_size, unsigned int *out_size);
 
 static int
 decode_ignore(const char *buffer, unsigned int buff_size, unsigned int *out_size);
@@ -151,6 +155,9 @@ static ParseCallbackTableItem callback_table[] =
 	},
 	{
 		"name", &decode_name
+	},
+	{
+		"inet", &decode_inet
 	},
 	{
 		"char", &decode_char
@@ -758,6 +765,59 @@ decode_bool(const char *buffer, unsigned int buff_size, unsigned int *out_size)
 
 	CopyAppend(*(bool *) buffer ? "t" : "f");
 	*out_size = sizeof(bool);
+	return 0;
+}
+
+/* Decode an inet address */
+static int
+decode_inet(const char *buffer, unsigned int buff_size, unsigned int *out_size) {
+
+ typedef struct
+ {
+     unsigned char inetlength;
+     unsigned char family;       /* PGSQL_AF_INET or PGSQL_AF_INET6 */
+     unsigned char bits;         /* number of bits in netmask */
+     unsigned char ipaddr[16];   /* up to 128 bits of address */
+ } inet_struct_reordered;
+
+    inet_struct_reordered *addr = (void*) buffer;
+
+    const char *new_buffer = (const char *) TYPEALIGN(sizeof(int32), (uintptr_t) buffer);
+    unsigned int delta = (unsigned int) ((uintptr_t) new_buffer - (uintptr_t) buffer);
+
+    if (buff_size < delta)
+        return -1;
+
+    buff_size -= delta;
+    buffer = new_buffer;
+
+    if (buff_size < sizeof(unsigned char))
+        return -2;
+
+    switch (addr->family) {
+	// ipv4=PGSQL_AF_INET=20 cf src/include/utils/inet.h PGSQL_AF_INET=AF_INET + 0
+        case PGSQL_AF_INET:
+            if (buff_size < sizeof(unsigned char)*(4))
+                return -2;
+	    // hide the netmask
+            CopyAppendFmt("%u.%u.%u.%u", addr->ipaddr[0], addr->ipaddr[1], addr->ipaddr[2], addr->ipaddr[3]);
+            // CopyAppendFmt("%u.%u.%u.%u/%u", addr->ipaddr[0], addr->ipaddr[1], addr->ipaddr[2], addr->ipaddr[3], addr->bits);
+	    break;
+	case PGSQL_AF_INET6:
+	    // hide the netmask
+            if (buff_size < sizeof(unsigned char)*(16))
+                return -2;
+            CopyAppendFmt("%u%u:%u%u:%u%u:%u%u:%u%u:%u%u:%u%u:%u%u", addr->ipaddr[0], addr->ipaddr[1], addr->ipaddr[2], addr->ipaddr[3], addr->ipaddr[4], addr->ipaddr[5], addr->ipaddr[6], addr->ipaddr[7], addr->ipaddr[8], addr->ipaddr[9], addr->ipaddr[10], addr->ipaddr[11], addr->ipaddr[12], addr->ipaddr[13], addr->ipaddr[14], addr->ipaddr[15]);
+            // CopyAppendFmt("%u%u:%u%u:%u%u:%u%u:%u%u:%u%u:%u%u:%u%u/%u", addr->ipaddr[0], addr->ipaddr[1], addr->ipaddr[2], addr->ipaddr[3], addr->ipaddr[4], addr->ipaddr[5], addr->ipaddr[6], addr->ipaddr[7], addr->ipaddr[8], addr->ipaddr[9], addr->ipaddr[10], addr->ipaddr[11], addr->ipaddr[12], addr->ipaddr[13], addr->ipaddr[14], addr->ipaddr[15], addr->bits);
+	    break;
+	default:
+	    // Unknown
+	    return(-1);
+	}
+
+        *out_size = addr->inetlength / sizeof(int16);
+        // printf ("out_size=>>%u<</n", *out_size);
+
 	return 0;
 }
 
