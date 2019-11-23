@@ -35,7 +35,8 @@
 #  - some pages: try to zero, vacuum then reindex:
 # SET zero_damaged_pages = on; VACUUM FULL;
 #
-# 4. Below is for when it was not enough!
+# 4. Below is for when it was not enough:
+# ./pg_csdvrx.sh /var/lib/postgresql/11/main
 
 MAGIC_PG_CLASS=1259
 MAGIC_PG_ATTRIBUTE=1249
@@ -50,7 +51,7 @@ NAMESPACE=$2
 
 # Step 2: find the relfilenode, using the same pg_class magic
 # WONTFIX: redundant for simple 1/1 matches, but checking prevents copy/paste mistakes
-[[ $# -lt 3 ]] && printf "Step 2/4: Please confirm the relfilenode matching the table you want:\n" && pg_filedump -D name,oid,oid,oid,oid,oid,oid,~  $PGPATH/base/16384/$MAGIC_PG_CLASS | grep "COPY: " | grep $NAMESPACE | awk '{ print $2 "\t" $8 }' | grep -v $'\t_' | grep -v pg_ && exit 2
+[[ $# -lt 3 ]] && printf "Step 2/4: Please confirm the relfilenode matching the table you want:\n" && pg_filedump -D name,oid,oid,oid,oid,oid,oid,~  $PGPATH/base/16384/$MAGIC_PG_CLASS | grep "COPY: " | grep $NAMESPACE | awk '{ print $2 "\t" $8 }' | grep -v $'\t_' | grep -v pg_ | sort | uniq && exit 2
 
 # Step 3.A: find the oids (schema) in the relfilenode, using pg_attribute magic
 RELFILENODE=$3
@@ -64,7 +65,7 @@ TYPESNUM=`echo "$OIDS" | awk '{ for (i = 1; i <= NF; i++) if (++j % 2 ==0 ) prin
 NAMES=`echo "$OIDS" | awk '{ for (i = 1; i <= NF; i++) if (++j % 2 ==1 ) print $i; }'  |grep -v ^.$`
 
 # Step 3.B: obtain the table name to protect the user from copy/paste mistakes
-TABLENAME=$(pg_filedump -D name,oid,oid,oid,oid,oid,oid,~  $PGPATH/base/16384/$MAGIC_PG_CLASS |grep "COPY: "| awk '{ print $8,$2}' | grep ^$RELFILENODE | awk '{ print $2 }' )
+TABLENAME=$(pg_filedump -D name,oid,oid,oid,oid,oid,oid,~  $PGPATH/base/16384/$MAGIC_PG_CLASS |grep "COPY: "| awk '{ print $8,$2}' | grep ^$RELFILENODE | awk '{ print $2 }' | sort | uniq )
 
 # Step 3.C: find the types using the pg_type magic
 TYPES=`for t in $TYPESNUM; do pg_filedump -i -D name,~  $PGPATH/base/16384/$MAGIC_PG_TYPE | grep -A5 -E "OID: $t$"  |grep "COPY:" | awk '{ print $2 '} ; done`
